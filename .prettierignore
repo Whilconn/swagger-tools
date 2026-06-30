@@ -1,0 +1,6 @@
+**/*.md
+**/*.svg
+src/index.html
+node_modules/
+dist/
+package.json

@@ -1,0 +1,22 @@
+{
+  "name": "swagger-tools",
+  "version": "1.0.0",
+  "description": "Swagger/OpenAPI spec parser",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "swagger-tools": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "cli": "node --experimental-strip-types src/cli.ts",
+    "test": "node --experimental-strip-types src/cli.ts api.json"
+  },
+  "keywords": ["swagger", "openapi", "parser"],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^26.0.1",
+    "typescript": "^6.0.3"
+  }
+}
