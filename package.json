@@ -12,11 +12,18 @@
     "cli": "node --experimental-strip-types src/cli.ts",
     "test": "node --experimental-strip-types src/cli.ts api.json"
   },
-  "keywords": ["swagger", "openapi", "parser"],
+  "keywords": [
+    "swagger",
+    "openapi",
+    "parser"
+  ],
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "@types/node": "^26.0.1",
     "typescript": "^6.0.3"
+  },
+  "volta": {
+    "node": "24.7.0"
   }
 }

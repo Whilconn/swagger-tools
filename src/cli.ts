@@ -132,6 +132,7 @@ function handleGenerate(args: string[]) {
   let baseUrl = '';
   let genTypes = true;
   let genComments = true;
+  let outFile: string | null = null;
 
   for (let i = 2; i < args.length; i++) {
     const arg = args[i];
@@ -139,14 +140,23 @@ function handleGenerate(args: string[]) {
     else if (arg === '--no-types') genTypes = false;
     else if (arg === '--no-comments') genComments = false;
     else if (arg === '--base-url' && args[i + 1]) { baseUrl = args[++i]!; }
+    else if (arg === '--out' && args[i + 1]) { outFile = args[++i]!; }
   }
 
-  console.log(`// [${api.methodType}] ${api.url} - ${api.summary}\n`);
-
+  let code: string;
   if (useCurl) {
-    console.log(generateCurlCode(api, { baseUrl }));
+    code = `// [${api.methodType}] ${api.url} - ${api.summary}\n\n` + generateCurlCode(api, { baseUrl });
   } else {
-    console.log(generateFetchCode(api, { baseUrl, types: genTypes, comments: genComments }));
+    code = `// [${api.methodType}] ${api.url} - ${api.summary}\n\n` + generateFetchCode(api, instance, { baseUrl, types: genTypes, comments: genComments });
+  }
+
+  if (outFile) {
+    const outPath = path.resolve(outFile);
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.writeFileSync(outPath, code + '\n', 'utf-8');
+    console.log(`代码已生成: ${outPath}`);
+  } else {
+    console.log(code);
   }
 }
 
