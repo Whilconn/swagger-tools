@@ -500,6 +500,168 @@ export function generateCurlCode(api: ParsedApiInfo, options?: GenerateOptions):
   return parts.join('\n');
 }
 
+/**
+ * 生成 axios 请求代码
+ */
+export function generateAxiosCode(
+  api: ParsedApiInfo,
+  instance?: ParsedInstance,
+  options?: GenerateOptions,
+): string {
+  const opts = { ...DEFAULT_OPTIONS, ...options };
+  const indent = ' '.repeat(opts.indentSize);
+  const definitions = instance?.definitions || [];
+
+  const lines: string[] = [];
+  const functionName = toCamelCase(api.operationId || api.summary || api.id);
+
+  // 收集请求参数
+  const queryParams = api.parameters.filter(p => p.in === 'query');
+  const pathParams = api.parameters.filter(p => p.in === 'path');
+  const headerParams = api.parameters.filter(p => p.in === 'header');
+  const bodyParams = api.parameters.filter(p => p.in === 'body');
+  const formDataParams = api.parameters.filter(p => p.in === 'formData');
+
+  // 构建 URL
+  let urlPath = api.url;
+  for (const pp of pathParams) {
+    if (pp.name) {
+      urlPath = urlPath.replace(`{${pp.name}}`, `\${${toSafeParamName(pp.name)}}`);
+    }
+  }
+  const hasPathParams = pathParams.length > 0;
+  const urlExpr = opts.baseUrl
+    ? (hasPathParams ? `\`${opts.baseUrl}${urlPath}\`` : `'${opts.baseUrl}${api.url}'`)
+    : (hasPathParams ? `\`${urlPath}\`` : `'${api.url}'`);
+
+  // 函数参数
+  const funcParams: string[] = [];
+  for (const pp of pathParams) {
+    funcParams.push(`${toSafeParamName(pp.name!)}: ${resolveTsType(pp)}`);
+  }
+  for (const qp of queryParams) {
+    const optional = qp.require ? '' : '?';
+    funcParams.push(`${toSafeParamName(qp.name!)}${optional}: ${resolveTsType(qp)}`);
+  }
+  for (const hp of headerParams) {
+    const optional = hp.require ? '' : '?';
+    funcParams.push(`${toSafeParamName(hp.name!)}${optional}: ${resolveTsType(hp)}`);
+  }
+  if (bodyParams.length > 0) {
+    const bp = bodyParams[0]!;
+    if (bp.def && opts.types) {
+      const reqTypeName = toEnglishName(bp.def.name);
+      funcParams.push(`data: ${reqTypeName}`);
+    } else {
+      funcParams.push(`data: ${resolveBodyTsType(bp)}`);
+    }
+  }
+  if (formDataParams.length > 0) {
+    funcParams.push(`data: FormData`);
+  }
+
+  const funcParamsStr = funcParams.length > 0 ? `\n${funcParams.map(p => `${indent}${p}`).join(',\n')}\n` : '';
+
+  // 解析响应类型
+  const response200 = api.responseCodes.find(r => r.code === '200');
+  let returnTypeTs = 'unknown';
+  let responseNode: GenericTypeNode | null = null;
+
+  if (response200?.schema) {
+    responseNode = parseGenericType(response200.schema);
+    returnTypeTs = genericNodeToTsType(responseNode);
+  } else if (response200?.responseText) {
+    returnTypeTs = basicTypeToTs(response200.responseText);
+  }
+
+  // 生成 TypeScript 类型定义
+  if (opts.types) {
+    if (bodyParams.length > 0 && bodyParams[0]!.def) {
+      const def = bodyParams[0]!.def;
+      const reqTypeName = toEnglishName(def.name);
+      lines.push(generateInterface(reqTypeName, def.properties, opts));
+      lines.push('');
+    }
+    if (responseNode) {
+      const responseInterfaces = generateResponseTypes(responseNode, definitions, opts);
+      for (const iface of responseInterfaces) {
+        lines.push(iface);
+        lines.push('');
+      }
+    }
+  }
+
+  // 函数注释
+  if (opts.comments && api.summary) {
+    lines.push('/**');
+    lines.push(` * ${api.summary}`);
+    if (api.deprecated) lines.push(' * @deprecated');
+    lines.push(' */');
+  }
+
+  // 函数签名
+  lines.push(`export async function ${functionName}(${funcParamsStr}): Promise<${returnTypeTs}> {`);
+
+  // 函数体内缩进
+  const i1 = indent;
+  const i2 = indent + indent;
+  const i3 = i2 + indent;
+
+  // 构建 axios config
+  const configLines: string[] = [];
+  configLines.push(`${i2}method: '${api.methodType}',`);
+  configLines.push(`${i2}url: ${urlExpr},`);
+
+  // Query params
+  if (queryParams.length > 0) {
+    configLines.push(`${i2}params: {`);
+    for (const qp of queryParams) {
+      if (opts.comments && qp.description) {
+        configLines.push(`${i3}// ${qp.description}`);
+      }
+      configLines.push(`${i3}${qp.name}: ${toSafeParamName(qp.name!)},`);
+    }
+    configLines.push(`${i2}},`);
+  }
+
+  // Headers
+  const headerLines: string[] = [];
+  const contentType = api.consumes[0] || 'application/json';
+  if (contentType && bodyParams.length > 0) {
+    headerLines.push(`${i3}'Content-Type': '${contentType}',`);
+  }
+  if (contentType && formDataParams.length > 0) {
+    headerLines.push(`${i3}// Content-Type 由浏览器自动设置 (multipart/form-data)`);
+  }
+  for (const hp of headerParams) {
+    const val = hp.require
+      ? `${toSafeParamName(hp.name!)}`
+      : `${toSafeParamName(hp.name!)} ?? ''`;
+    headerLines.push(`${i3}'${hp.name}': ${val},`);
+  }
+  if (headerLines.length > 0) {
+    configLines.push(`${i2}headers: {`);
+    configLines.push(...headerLines);
+    configLines.push(`${i2}},`);
+  }
+
+  // Body
+  if (bodyParams.length > 0) {
+    configLines.push(`${i2}data: data,`);
+  }
+  if (formDataParams.length > 0) {
+    configLines.push(`${i2}data: data,`);
+  }
+
+  // Axios 调用
+  lines.push(`${i1}const response = await axios(${configLines.length > 3 ? `{\n${configLines.join('\n')}\n${i1}}` : `{ ${configLines.join(' ')} }`});`);
+  lines.push('');
+  lines.push(`${i1}return response.data;`);
+  lines.push('}');
+
+  return lines.join('\n');
+}
+
 // ============ 辅助函数 ============
 
 function toCamelCase(str: string): string {
