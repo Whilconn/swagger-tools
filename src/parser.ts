@@ -17,14 +17,14 @@ import type {
   ParsedInstance, ParsedDefinition, ParsedProperty, ParsedParameter,
   ParsedApiInfo, ParsedTag, ParsedSecurity, ParsedResponseCode,
   ValidateInstance,
-} from './types.js';
+} from './types.ts';
 import {
   isBasicType, getBasicTypeValue, getClassName, oasModelPattern,
   getValue, propValue, getExample, checkUndefined, strNotBlank, strBlank,
   arrNotEmpty, arrEmpty, checkParamArrsExists, validateJSR303,
   appendBasePath, enumAvailableLabel, replaceMultipLineStr,
   checkPropertiesExists, uniqueId,
-} from './utils.js';
+} from './utils.ts';
 
 const SUPPORT_METHODS = ['get', 'post', 'put', 'delete', 'patch', 'options', 'trace', 'head'] as const;
 

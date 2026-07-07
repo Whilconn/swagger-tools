@@ -9,9 +9,9 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseSwaggerSpec } from './parser.js';
-import { generateFetchCode, generateCurlCode } from './generator.js';
-import type { SwaggerSpec } from './types.js';
+import { parseSwaggerSpec } from './parser.ts';
+import { generateFetchCode, generateCurlCode } from './generator.ts';
+import type { SwaggerSpec, ParsedInstance, ParsedApiInfo } from './types.ts';
 
 function main() {
   const args = process.argv.slice(2);
@@ -36,12 +36,15 @@ function printHelp() {
 用法:
   swagger-tools <swagger.json> [output.json]           解析并输出摘要/JSON
   swagger-tools generate <swagger.json> <path> [opts]  生成 fetch 请求代码
+  swagger-tools generate <swagger.json> --tag <tag>    按标签生成分组下所有接口代码
 
 选项:
   --curl          生成 curl 命令而非 fetch
   --no-types      不生成 TypeScript 类型定义
   --no-comments   不生成注释
   --base-url <u>  设置基础 URL
+  --tag <tag>     按标签 (tag) 生成该分组下所有接口的代码
+  --out <path>    输出路径 (按标签生成时视为目录)
 
 示例:
   swagger-tools api.json
@@ -49,6 +52,8 @@ function printHelp() {
   swagger-tools generate api.json /drawing/class/queryStudentRead
   swagger-tools generate api.json /drawing/class/queryStudentRead --curl
   swagger-tools generate api.json /drawing/class/queryStudentRead --base-url https://api.example.com
+  swagger-tools generate api.json --tag 绘本相关
+  swagger-tools generate api.json --tag 绘本相关 --out ./output --base-url https://api.example.com
 `);
 }
 
@@ -106,26 +111,14 @@ function handleParse(args: string[]) {
 }
 
 function handleGenerate(args: string[]) {
-  if (args.length < 2) {
-    console.error('用法: swagger-tools generate <swagger.json> <path> [opts]');
+  if (args.length < 1) {
+    console.error('用法: swagger-tools generate <swagger.json> [path] [opts]');
+    console.error('  或: swagger-tools generate <swagger.json> --tag <tagName> [opts]');
     process.exit(1);
   }
 
   const spec = loadSpec(args[0]!);
-  const searchPath = args[1]!;
   const instance = parseSwaggerSpec(spec);
-
-  // 查找匹配的接口 (支持部分匹配)
-  let api = instance.paths.find(p => p.url === searchPath);
-  if (!api) {
-    api = instance.paths.find(p => p.url.includes(searchPath));
-  }
-  if (!api) {
-    console.error(`未找到路径: ${searchPath}`);
-    console.error(`可用路径 (前10条):`);
-    instance.paths.slice(0, 10).forEach(p => console.error(`  [${p.methodType}] ${p.url}`));
-    process.exit(1);
-  }
 
   // 解析选项
   let useCurl = false;
@@ -133,21 +126,61 @@ function handleGenerate(args: string[]) {
   let genTypes = true;
   let genComments = true;
   let outFile: string | null = null;
+  let tagName: string | null = null;
+  let pathArg: string | null = null;
 
-  for (let i = 2; i < args.length; i++) {
+  for (let i = 1; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--curl') useCurl = true;
     else if (arg === '--no-types') genTypes = false;
     else if (arg === '--no-comments') genComments = false;
-    else if (arg === '--base-url' && args[i + 1]) { baseUrl = args[++i]!; }
-    else if (arg === '--out' && args[i + 1]) { outFile = args[++i]!; }
+    else if (arg === '--base-url' && args[i + 1]) {
+      baseUrl = args[++i]!;
+    } else if (arg === '--out' && args[i + 1]) {
+      outFile = args[++i]!;
+    } else if (arg === '--tag' && args[i + 1]) {
+      tagName = args[++i]!;
+    } else if (!arg.startsWith('--')) {
+      pathArg = arg;
+    }
+  }
+
+  // 按 tag 生成
+  if (tagName) {
+    return handleGenerateByTag(instance, tagName, {
+      useCurl,
+      baseUrl,
+      types: genTypes,
+      comments: genComments,
+      outDir: outFile,
+    });
+  }
+
+  // 没有 path 参数报错
+  if (!pathArg) {
+    console.error('请指定接口路径或使用 --tag 指定标签');
+    process.exit(1);
+  }
+
+  // 查找匹配的接口 (支持部分匹配)
+  let api = instance.paths.find((p) => p.url === pathArg);
+  if (!api) {
+    api = instance.paths.find((p) => p.url.includes(pathArg));
+  }
+  if (!api) {
+    console.error(`未找到路径: ${pathArg}`);
+    console.error(`可用路径 (前10条):`);
+    instance.paths.slice(0, 10).forEach((p) => console.error(`  [${p.methodType}] ${p.url}`));
+    process.exit(1);
   }
 
   let code: string;
   if (useCurl) {
     code = `// [${api.methodType}] ${api.url} - ${api.summary}\n\n` + generateCurlCode(api, { baseUrl });
   } else {
-    code = `// [${api.methodType}] ${api.url} - ${api.summary}\n\n` + generateFetchCode(api, instance, { baseUrl, types: genTypes, comments: genComments });
+    code =
+      `// [${api.methodType}] ${api.url} - ${api.summary}\n\n` +
+      generateFetchCode(api, instance, { baseUrl, types: genTypes, comments: genComments });
   }
 
   if (outFile) {
@@ -158,6 +191,76 @@ function handleGenerate(args: string[]) {
   } else {
     console.log(code);
   }
+}
+
+/** 按 tag 生成所有接口的 fetch/curl 代码 */
+function handleGenerateByTag(
+  instance: ParsedInstance,
+  tagName: string,
+  options: { useCurl: boolean; baseUrl: string; types: boolean; comments: boolean; outDir: string | null },
+) {
+  const tag = instance.tags.find((t) => t.name === tagName || t.name.toLowerCase() === tagName.toLowerCase());
+  if (!tag) {
+    console.error(`未找到标签: ${tagName}`);
+    console.error(`可用标签:`);
+    instance.tags.forEach((t) => console.error(`  ${t.name} (${t.childrens.length} 个接口)`));
+    process.exit(1);
+  }
+
+  const apis = tag.childrens;
+  if (apis.length === 0) {
+    console.error(`标签 "${tagName}" 下没有接口`);
+    process.exit(1);
+  }
+
+  console.log(`标签 "${tagName}": ${apis.length} 个接口\n`);
+
+  if (options.outDir) {
+    // 输出到目录，每个接口一个文件
+    const outDirPath = path.resolve(options.outDir, tagName);
+    fs.mkdirSync(outDirPath, { recursive: true });
+
+    for (const api of apis) {
+      const code = generateSingleApiCode(api, instance, options);
+      const method = api.methodType.toLowerCase();
+      const safePath = api.url
+        .replace(/[\/{}]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '');
+      const fileName = `${method}_${safePath}.ts`;
+      const filePath = path.join(outDirPath, fileName);
+      fs.writeFileSync(filePath, code, 'utf-8');
+      console.log(`  ✓ ${fileName}`);
+    }
+    console.log(`\n代码已生成到目录: ${outDirPath}`);
+  } else {
+    // 全部输出到 stdout
+    for (const api of apis) {
+      const code = generateSingleApiCode(api, instance, options);
+      console.log(code);
+      console.log('\n' + '='.repeat(72) + '\n');
+    }
+  }
+}
+
+/** 为单个接口生成代码（含头部注释） */
+function generateSingleApiCode(
+  api: ParsedApiInfo,
+  instance: ParsedInstance,
+  options: { useCurl: boolean; baseUrl: string; types: boolean; comments: boolean },
+): string {
+  const header = `// [${api.methodType}] ${api.url} - ${api.summary}`;
+  let body: string;
+  if (options.useCurl) {
+    body = generateCurlCode(api, { baseUrl: options.baseUrl });
+  } else {
+    body = generateFetchCode(api, instance, {
+      baseUrl: options.baseUrl,
+      types: options.types,
+      comments: options.comments,
+    });
+  }
+  return `${header}\n\n${body}\n`;
 }
 
 main();

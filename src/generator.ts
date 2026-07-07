@@ -1,7 +1,7 @@
 /**
  * 根据 ParsedApiInfo 生成 fetch 请求代码
  */
-import type { ParsedApiInfo, ParsedParameter, ParsedDefinition, ParsedProperty, ParsedInstance } from './types.js';
+import type { ParsedApiInfo, ParsedParameter, ParsedDefinition, ParsedProperty, ParsedInstance } from './types.ts';
 
 /** 代码生成选项 */
 export interface GenerateOptions {

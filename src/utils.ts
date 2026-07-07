@@ -1,7 +1,7 @@
 /**
  * 工具函数
  */
-import type { Schema, ValidateInstance } from './types.js';
+import type { Schema, ValidateInstance } from './types.ts';
 
 const BASIC_TYPES = ['string', 'integer', 'number', 'object', 'boolean', 'int32', 'int64', 'float', 'double'];
 
@@ -14,13 +14,20 @@ export function isBasicType(type: string | undefined | null): boolean {
 /** 获取基本类型的默认值 */
 export function getBasicTypeValue(type: string): unknown {
   switch (type) {
-    case 'integer': return 0;
-    case 'boolean': return true;
-    case 'object': return {};
-    case 'number': return 0;
-    case 'double': return 0.5;
-    case 'float': return 0.0;
-    default: return '';
+    case 'integer':
+      return 0;
+    case 'boolean':
+      return true;
+    case 'object':
+      return {};
+    case 'number':
+      return 0;
+    case 'double':
+      return 0.5;
+    case 'float':
+      return 0.0;
+    default:
+      return '';
   }
 }
 
@@ -45,7 +52,12 @@ export function oasModelPattern(oas2: boolean): RegExp {
 }
 
 /** 安全获取对象属性值 */
-export function getValue<T>(obj: Record<string, unknown> | null | undefined, key: string, defaultValue: T, checkEmpty = false): T {
+export function getValue<T>(
+  obj: Record<string, unknown> | null | undefined,
+  key: string,
+  defaultValue: T,
+  checkEmpty = false,
+): T {
   if (obj == null) return defaultValue;
   if (key in obj) {
     let val = obj[key] as T;
@@ -67,7 +79,11 @@ export function getExample(key: string, obj: Record<string, unknown>, defaultVal
   const v = propValue(key, obj, defaultValue);
   if (typeof v === 'number') return v;
   if (typeof v === 'object' && v !== null) {
-    try { return JSON.stringify(v); } catch { return v; }
+    try {
+      return JSON.stringify(v);
+    } catch {
+      return v;
+    }
   }
   return v;
 }
@@ -98,12 +114,18 @@ export function arrEmpty<T>(arr: T[] | null | undefined): boolean {
 }
 
 /** 判断参数是否在参数数组中已存在 */
-export function checkParamArrsExists(arr: { name: string | null; in: string | null }[], param: { name: string | null; in: string | null }): boolean {
-  return arr.some(row => `${row.name ?? ''}${row.in ?? ''}` === `${param.name ?? ''}${param.in ?? ''}`);
+export function checkParamArrsExists(
+  arr: { name: string | null; in: string | null }[],
+  param: { name: string | null; in: string | null },
+): boolean {
+  return arr.some((row) => `${row.name ?? ''}${row.in ?? ''}` === `${param.name ?? ''}${param.in ?? ''}`);
 }
 
 /** JSR-303 校验注解解析 */
-export function validateJSR303(origin: Record<string, unknown>): { status: boolean; instance: ValidateInstance | null } {
+export function validateJSR303(origin: Record<string, unknown>): {
+  status: boolean;
+  instance: ValidateInstance | null;
+} {
   const max = origin['maximum'] as number | undefined;
   const min = origin['minimum'] as number | undefined;
   const emin = origin['exclusiveMinimum'] as number | undefined;
@@ -131,7 +153,7 @@ export function appendBasePath(paths: Record<string, unknown>, basePath: string 
       const pathKeys = Object.keys(paths);
       if (pathKeys.length === 0) return true;
       const basePathStr = basePath + '/';
-      const num = pathKeys.filter(k => k.startsWith(basePathStr)).length;
+      const num = pathKeys.filter((k) => k.startsWith(basePathStr)).length;
       // 如果超过 60% 的 path 已经包含 basePath，则认为已经追加过
       if (num === pathKeys.length || (pathKeys.length > 0 && (num / pathKeys.length) * 100 >= 60)) {
         return true;
@@ -156,8 +178,11 @@ export function replaceMultipLineStr(str: string | null): string {
 }
 
 /** 判断属性是否已存在于属性列表中 */
-export function checkPropertiesExists(properties: { name: string; in?: string; type?: string }[], prop: { name: string; in?: string; type?: string }): boolean {
-  return properties.some(p => p.name === prop.name && p.in === prop.in && p.type === prop.type);
+export function checkPropertiesExists(
+  properties: { name: string; in?: string; type?: string }[],
+  prop: { name: string; in?: string; type?: string },
+): boolean {
+  return properties.some((p) => p.name === prop.name && p.in === prop.in && p.type === prop.type);
 }
 
 /** 生成简易唯一 ID */
