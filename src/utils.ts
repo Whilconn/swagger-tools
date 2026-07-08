@@ -36,7 +36,13 @@ export function getClassName(ref: string | undefined, oas2: boolean): string | n
   if (!ref) return null;
   const pattern = oas2 ? /^#\/definitions\/(.+)$/ : /^#\/components\/schemas\/(.+)$/;
   const match = ref.match(pattern);
-  return match ? match[1] : null;
+  if (match) return match[1];
+
+  // 兼容裸模型名 (缺少 #/definitions/ 或 #/components/schemas/ 前缀，如 "StudentSeriesReadDetailVo.StudentLevelReadVo")
+  if (!ref.includes('#') && !ref.includes('/')) {
+    return ref;
+  }
+  return null;
 }
 
 /** 从 $ref 中提取参数名 (OAS3 components/parameters) */

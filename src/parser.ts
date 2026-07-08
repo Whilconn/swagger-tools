@@ -19,7 +19,7 @@ import type {
   ValidateInstance,
 } from './types.ts';
 import {
-  isBasicType, getBasicTypeValue, getClassName, oasModelPattern,
+  isBasicType, getBasicTypeValue, getClassName,
   getValue, propValue, getExample, checkUndefined, strNotBlank, strBlank,
   arrNotEmpty, arrEmpty, checkParamArrsExists, validateJSR303,
   appendBasePath, enumAvailableLabel, replaceMultipLineStr,
@@ -808,14 +808,13 @@ function parseResponseSchemaOAS2(
   const schema = respObj.schema;
   if (!schema) return;
 
-  const regex = oasModelPattern(oas2);
   let arr = false;
   let rptype: string | null = null;
 
   if (schema.$ref) {
-    const match = schema.$ref.match(regex);
+    const match = getClassName(schema.$ref, oas2);
     if (match) {
-      rptype = match[1];
+      rptype = match;
       swpinfo.responseParameterRefName = rptype;
       responseCode.responseParameterRefName = rptype;
       responseCode.schema = rptype;
@@ -830,9 +829,9 @@ function parseResponseSchemaOAS2(
           itref = items.items.$ref;
         }
         if (itref) {
-          const match = itref.match(regex);
+          const match = getClassName(itref, oas2);
           if (match) {
-            rptype = match[1];
+            rptype = match;
             swpinfo.responseParameterRefName = rptype;
             responseCode.responseParameterRefName = rptype;
             responseCode.schema = rptype;
@@ -881,14 +880,13 @@ function parseResponseSchemaOAS3(
     const schema = mediaType.schema;
     if (!schema) continue;
 
-    const regex = oasModelPattern(oas2);
     let arr = false;
     let rptype: string | null = null;
 
     if (schema.$ref) {
-      const match = schema.$ref.match(regex);
+      const match = getClassName(schema.$ref, oas2);
       if (match) {
-        rptype = match[1];
+        rptype = match;
         swpinfo.responseParameterRefName = rptype;
         responseCode.responseParameterRefName = rptype;
         responseCode.schema = rptype;
@@ -897,9 +895,9 @@ function parseResponseSchemaOAS3(
       arr = true;
       const items = schema.items;
       if (items.$ref) {
-        const match = items.$ref.match(regex);
+        const match = getClassName(items.$ref, oas2);
         if (match) {
-          rptype = match[1];
+          rptype = match;
           swpinfo.responseParameterRefName = rptype;
           responseCode.responseParameterRefName = rptype;
           responseCode.schema = rptype;

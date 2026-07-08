@@ -2,6 +2,7 @@
  * 根据 ParsedApiInfo 生成 fetch 请求代码
  */
 import type { ParsedApiInfo, ParsedParameter, ParsedDefinition, ParsedProperty, ParsedInstance } from './types.ts';
+import { pinyin } from 'pinyin-pro';
 
 /** 代码生成选项 */
 export interface GenerateOptions {
@@ -40,29 +41,54 @@ const CHINESE_TYPE_MAP: Record<string, string> = {
   '接口统一返回封装对象«': 'ApiResponse',
   '分页返回封装对象': 'PageResponse',
   '分页返回封装': 'PageResponse',
+  '分页封装对象': 'PageResponse',
+  '分页封装': 'PageResponse',
   '通用返回封装对象': 'CommonResponse',
   '通用返回封装': 'CommonResponse',
   '返回结果封装对象': 'ResultResponse',
   '返回结果': 'Result',
 };
 
-/** 将含中文的类型名转为英文 */
-function toEnglishTypeName(name: string): string {
-  // 直接命中映射
-  if (CHINESE_TYPE_MAP[name]) return CHINESE_TYPE_MAP[name]!;
+/** 将含中文的名称转为可读的 PascalCase 英文标识符（基于拼音） */
+function chineseToIdentifier(name: string): string {
+  const syllables = pinyin(name, { toneType: 'none', type: 'array' }) as string[];
+  const pascal = syllables
+    .map(s => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : ''))
+    .join('');
+  return pascal.replace(/[^a-zA-Z0-9]/g, '') || 'UnknownType';
+}
 
-  // 包含中文时，尝试部分匹配
-  if (/[\u4e00-\u9fff]/.test(name)) {
-    for (const [cn, en] of Object.entries(CHINESE_TYPE_MAP)) {
-      if (name.includes(cn)) return en;
-    }
-    // 无法映射的中文类型，用 Type 前缀 + 纯 ASCII 部分
-    const asciiPart = name.replace(/[\u4e00-\u9fff«»]/g, '').replace(/[^a-zA-Z0-9_]/g, '_').replace(/^_+|_+$/g, '');
-    return asciiPart ? `Type${asciiPart}` : 'UnknownType';
+/**
+ * 将含中文/嵌套的类型名转为英文。
+ * - authoritative=true 表示结果来自 CHINESE_TYPE_MAP（直接或部分匹配），属于「已知概念」，
+ *   多个不同原始名映射到同一英文是预期行为（同义词），允许复用。
+ * - authoritative=false 表示结果来自拼音/简化/纯 ASCII 清洗，需做冲突去重。
+ */
+function toEnglishTypeName(name: string): { en: string; authoritative: boolean } {
+  // 直接命中映射
+  if (CHINESE_TYPE_MAP[name]) return { en: CHINESE_TYPE_MAP[name]!, authoritative: true };
+
+  // 嵌套模型 (带点，如 StudentSeriesReadDetailVo.StudentLevelReadVo)：简化为最后一段
+  const dotIdx = name.lastIndexOf('.');
+  if (dotIdx !== -1) {
+    const last = name.substring(dotIdx + 1);
+    const cleaned = last.replace(/[^a-zA-Z0-9]/g, '');
+    if (cleaned) return { en: cleaned, authoritative: false };
+    // 最后一段为纯中文：用拼音
+    return { en: chineseToIdentifier(last), authoritative: false };
   }
 
-  // 纯 ASCII，清理特殊字符
-  return name.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^_+|_+$/g, '') || 'UnknownType';
+  // 包含中文时，尝试部分匹配（命中映射表即视为已知概念）
+  if (/[\u4e00-\u9fff]/.test(name)) {
+    for (const [cn, en] of Object.entries(CHINESE_TYPE_MAP)) {
+      if (name.includes(cn)) return { en, authoritative: true };
+    }
+    // 用拼音生成可读英文名（兼容混合 ASCII，如 学生考试成绩Vo）
+    return { en: chineseToIdentifier(name), authoritative: false };
+  }
+
+  // 纯 ASCII，清理特殊字符（去掉点、下划线等非字母数字字符）
+  return { en: name.replace(/[^a-zA-Z0-9]/g, '') || 'UnknownType', authoritative: false };
 }
 
 /** 解析泛型字符串 `A«B«C»»` 为 GenericTypeNode 树 */
@@ -108,11 +134,53 @@ function splitTopLevel(str: string): string[] {
   return parts;
 }
 
-/** 外层类型名转英文 */
+/**
+ * 类型名缓存：原始名 -> 最终英文类型名
+ * 保证同一原始名在整次生成中始终映射到同一类型名（与 cli 的「按名去重」配合），
+ * 并在发生重名时回退为完整拼接名 + 数字后缀，避免类型冲突。
+ */
+const typeNameCache = new Map<string, string>();
+const usedTypeNames = new Set<string>();
+
+/** 外层类型名转英文（带冲突去重） */
 function toEnglishName(name: string): string {
   // List 在 TS 中映射为 Array
   if (name === 'List' || name === 'list') return 'Array';
-  return toEnglishTypeName(name);
+  if (typeNameCache.has(name)) return typeNameCache.get(name)!;
+
+  const { en: candidate, authoritative } = toEnglishTypeName(name);
+  if (!usedTypeNames.has(candidate)) {
+    usedTypeNames.add(candidate);
+    typeNameCache.set(name, candidate);
+    return candidate;
+  }
+
+  // 重名处理
+  if (authoritative) {
+    // 来自映射表的同义词（如 分页封装对象 / 分页返回封装对象 都应是 PageResponse），
+    // 复用同一英文名是预期行为，直接返回即可。
+    typeNameCache.set(name, candidate);
+    return candidate;
+  }
+
+  // 简化/清洗得到的重名：回退到完整拼接名（去除点等非字母数字字符；纯中文用拼音）
+  const full = name.replace(/[^a-zA-Z0-9]/g, '') || chineseToIdentifier(name);
+  if (full !== candidate && !usedTypeNames.has(full)) {
+    usedTypeNames.add(full);
+    typeNameCache.set(name, full);
+    return full;
+  }
+
+  // 仍重名：追加数字后缀
+  let i = 1;
+  let alt = `${full}${i}`;
+  while (usedTypeNames.has(alt)) {
+    i++;
+    alt = `${full}${i}`;
+  }
+  usedTypeNames.add(alt);
+  typeNameCache.set(name, alt);
+  return alt;
 }
 
 /** 将 GenericTypeNode 转为 TypeScript 类型字符串 */
@@ -210,7 +278,7 @@ function generateResponseTypes(
       const baseName = def.name.replace(/«.*»$/, '');
       const enName = toEnglishName(baseName);
       if (!generated.has(enName)) {
-        interfaces.push(generateGenericInterface(enName, def, responseNode, definitions, opts));
+        interfaces.push(generateGenericInterface(enName, def, opts));
         generated.add(enName);
       }
     } else {
@@ -229,8 +297,6 @@ function generateResponseTypes(
 function generateGenericInterface(
   enName: string,
   def: ParsedDefinition,
-  responseNode: GenericTypeNode,
-  definitions: ParsedDefinition[],
   opts: Required<GenerateOptions>,
 ): string {
   const indent = ' '.repeat(opts.indentSize);
@@ -240,13 +306,28 @@ function generateGenericInterface(
   const typeParam = 'T';
   lines.push(`export interface ${enName}<${typeParam}> {`);
 
+  // 从 定义名 (如 `分页封装对象«StudentReadRecordVo»`) 中取出泛型实参原始名，
+  // 用于定位真正的「数据载体」字段（可能是 data / result / list 等），将其类型设为 T。
+  const baseName = def.name.replace(/«.*»$/, '');
+  const innerRaw = def.name.slice(baseName.length).replace(/^«/, '').replace(/»$/, '');
+
+  const payloadCandidates = ['data', 'result', 'list', 'records', 'content', 'items', 'rows', 'dataList'];
+  let payloadProp: ParsedProperty | undefined;
+  if (innerRaw) {
+    payloadProp = def.properties.find(p => p.refType && p.refType === innerRaw);
+  }
+  if (!payloadProp) {
+    payloadProp = def.properties.find(p => payloadCandidates.includes(p.name) && !!p.refType)
+      ?? def.properties.find(p => !!p.refType);
+  }
+
   for (const prop of def.properties) {
     const optional = prop.required ? '' : '?';
     let tsType: string;
 
-    // data 字段使用泛型参数 T
-    if (prop.name === 'data') {
-      tsType = typeParam;
+    if (payloadProp && prop === payloadProp) {
+      // 数据载体字段使用泛型参数 T（数组则 T[]）
+      tsType = prop.type === 'array' ? `${typeParam}[]` : typeParam;
     } else {
       tsType = propertyToTsType(prop);
     }
