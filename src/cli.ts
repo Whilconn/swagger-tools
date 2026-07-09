@@ -335,19 +335,27 @@ function findApiByPath(instance: ParsedInstance, searchPath: string): ParsedApiI
   return api;
 }
 
+/** 将接口路径转成简短的文件名（取路径最后一段，如 /ossApi/batchGetOssCdnAuthAccessUrl → batchGetOssCdnAuthAccessUrl.ts） */
+function apiPathToFileName(api: ParsedApiInfo): string {
+  const lastSeg = api.url.split('/').filter(Boolean).pop() ?? api.url;
+  const raw = lastSeg.replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+  return `${raw}.ts`;
+}
+
 /** 输出单个接口的生成代码 */
 function outputSingleApi(
   api: ParsedApiInfo, instance: ParsedInstance,
   options: { format: 'curl' | 'fetch' | 'axios'; baseUrl: string; types: boolean; comments: boolean },
-  outFile: string | null,
+  outDir: string | null,
 ): void {
   const code = generateSingleApiCode(api, instance, options);
 
-  if (outFile) {
-    const outPath = path.resolve(outFile);
-    fs.mkdirSync(path.dirname(outPath), { recursive: true });
-    fs.writeFileSync(outPath, code + '\n', 'utf-8');
-    console.log(`代码已生成: ${outPath}`);
+  if (outDir) {
+    const outDirPath = path.resolve(outDir);
+    fs.mkdirSync(outDirPath, { recursive: true });
+    const filePath = path.join(outDirPath, apiPathToFileName(api));
+    fs.writeFileSync(filePath, code + '\n', 'utf-8');
+    console.log(`代码已生成: ${filePath}`);
   } else {
     console.log(code);
   }
