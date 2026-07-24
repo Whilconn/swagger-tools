@@ -21,16 +21,14 @@ import type { SwaggerSpec, ParsedInstance, ParsedApiInfo } from './types.ts';
 
 // 配置文件支持的字段（与命令行选项完全对应）
 interface GenerateConfig {
-  /** [可选，已弃用] 本地文件路径，等价于 file。建议改用 file 或 url */
-  spec?: string;
   /** [二选一] 本地 Swagger 规范文件路径 */
   file?: string;
   /** [二选一] 远程 Swagger 规范 URL */
   url?: string;
-  /** [二选一] 按标签 (tag) 生成该分组下所有接口的代码 */
-  tag?: string;
-  /** [二选一] 按接口路径生成（支持部分路径匹配） */
-  path?: string;
+  /** [二选一] 按标签 (tag) 生成各分组下所有接口的代码（数组，每个 tag 生成一个文件） */
+  tags?: string[];
+  /** [二选一] 按接口路径生成（支持部分路径匹配，数组，每个路径生成一个文件） */
+  paths?: string[];
   /** [可选] 输出目录。按 tag 生成时写入 <dir>/<tag>.ts */
   output?: string;
   /** [可选] 基础 URL。为空时从规范文档中推断 */
@@ -52,14 +50,18 @@ const CONFIG_CANDIDATES = [
   '.swagger-toolsrc.json',
 ];
 
+/** 将 string[] | undefined 归一化为数组 */
+function toArray(value: string[] | undefined): string[] {
+  return value ?? [];
+}
+
 /** 补全配置默认值 */
 function fillConfigDefaults(config: Partial<GenerateConfig>): GenerateConfig {
   return {
-    spec: config.spec,
     file: config.file,
     url: config.url,
-    tag: config.tag,
-    path: config.path,
+    tags: toArray(config.tags),
+    paths: toArray(config.paths),
     output: config.output,
     baseUrl: config.baseUrl ?? '',
     format: config.format ?? 'fetch',
@@ -70,15 +72,11 @@ function fillConfigDefaults(config: Partial<GenerateConfig>): GenerateConfig {
 
 /** 校验配置文件是否指定了规范来源 */
 function validateSpecSource(cfg: Partial<GenerateConfig>, configPath: string): void {
-  const hasFile = !!(cfg.file || cfg.spec);
+  const hasFile = !!cfg.file;
   const hasUrl = !!cfg.url;
   if (!hasFile && !hasUrl) {
-    console.error(`配置文件需指定 "file"（或已弃用的 "spec"）或 "url": ${configPath}`);
+    console.error(`配置文件需指定 "file" 或 "url": ${configPath}`);
     process.exit(1);
-  }
-  // spec → file 兼容处理
-  if (!cfg.file && cfg.spec) {
-    cfg.file = cfg.spec;
   }
 }
 
@@ -191,8 +189,8 @@ function printHelp() {
 配置文件选项（swagger-tools.config.mjs）:
   file       [二选一] 本地 Swagger 规范文件路径
   url        [二选一] 远程 Swagger 规范 URL
-  tag        [二选一] 按标签生成该分组下所有接口的代码
-  path       [二选一] 按接口路径生成（支持部分路径匹配）
+  tags       [二选一] 按标签生成各分组下所有接口的代码（数组，每个 tag 一个文件）
+  paths      [二选一] 按接口路径生成（支持部分路径匹配，数组，每个路径一个文件）
   output     [可选] 输出目录。按 tag 生成时写入 <dir>/<tag>.ts
   baseUrl    [可选] 基础 URL
   format     [可选] 输出格式: curl / fetch / axios（默认 fetch）
@@ -216,7 +214,7 @@ async function runWithConfig(config: GenerateConfig): Promise<void> {
   if (config.url) {
     spec = await fetchSpec(config.url);
   } else {
-    spec = loadSpecFile(config.file ?? config.spec!);
+    spec = loadSpecFile(config.file!);
   }
   const instance = parseSwaggerSpec(spec);
 
@@ -227,19 +225,24 @@ async function runWithConfig(config: GenerateConfig): Promise<void> {
   const genComments = config.comments ?? true;
   const outDir = config.output ?? null;
 
-  // 按 tag 优先
-  if (config.tag) {
-    return handleGenerateByTag(instance, config.tag, { format, baseUrl, types: genTypes, comments: genComments, outDir });
-  }
+  const tags = config.tags ?? [];
+  const paths = config.paths ?? [];
 
-  // 按路径
-  if (config.path) {
-    const api = findApiByPath(instance, config.path);
-    outputSingleApi(api, instance, { format, baseUrl, types: genTypes, comments: genComments }, outDir);
+  // 按 tag 优先（每个 tag 生成一个文件）
+  if (tags.length > 0) {
+    for (const t of tags) {
+      handleGenerateByTag(instance, t, { format, baseUrl, types: genTypes, comments: genComments, outDir });
+    }
     return;
   }
 
-  console.error('配置文件需指定 "tag" 或 "path"');
+  // 按路径（所有路径合并写入同一个文件）
+  if (paths.length > 0) {
+    handleGenerateByPaths(instance, paths, { format, baseUrl, types: genTypes, comments: genComments, outDir });
+    return;
+  }
+
+  console.error('配置文件需指定 "tags" 或 "paths"（非空数组）');
   process.exit(1);
 }
 
@@ -322,43 +325,80 @@ function handleParse(args: string[]) {
   }
 }
 
-/** 根据路径查找接口（支持部分匹配） */
-function findApiByPath(instance: ParsedInstance, searchPath: string): ParsedApiInfo {
+/** 根据路径查找接口（支持部分匹配），未找到返回 null */
+function findApiByPath(instance: ParsedInstance, searchPath: string): ParsedApiInfo | null {
   let api = instance.paths.find((p) => p.url === searchPath);
   if (!api) api = instance.paths.find((p) => p.url.includes(searchPath));
   if (!api) {
     console.error(`未找到路径: ${searchPath}`);
     console.error(`可用路径 (前10条):`);
     instance.paths.slice(0, 10).forEach((p) => console.error(`  [${p.methodType}] ${p.url}`));
-    process.exit(1);
+    process.exitCode = 1;
+    return null;
   }
   return api;
 }
 
-/** 将接口路径转成简短的文件名（取路径最后一段，如 /ossApi/batchGetOssCdnAuthAccessUrl → batchGetOssCdnAuthAccessUrl.ts） */
-function apiPathToFileName(api: ParsedApiInfo): string {
-  const lastSeg = api.url.split('/').filter(Boolean).pop() ?? api.url;
-  const raw = lastSeg.replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
-  return `${raw}.ts`;
-}
-
-/** 输出单个接口的生成代码 */
-function outputSingleApi(
-  api: ParsedApiInfo, instance: ParsedInstance,
-  options: { format: 'curl' | 'fetch' | 'axios'; baseUrl: string; types: boolean; comments: boolean },
-  outDir: string | null,
+/** 按路径列表生成：所有匹配的接口合并写入同一个文件，重复的类型定义自动去重 */
+function handleGenerateByPaths(
+  instance: ParsedInstance, searchPaths: string[],
+  options: { format: 'curl' | 'fetch' | 'axios'; baseUrl: string; types: boolean; comments: boolean; outDir: string | null },
 ): void {
-  const code = generateSingleApiCode(api, instance, options);
-
-  if (outDir) {
-    const outDirPath = path.resolve(outDir);
-    fs.mkdirSync(outDirPath, { recursive: true });
-    const filePath = path.join(outDirPath, apiPathToFileName(api));
-    fs.writeFileSync(filePath, code + '\n', 'utf-8');
-    console.log(`代码已生成: ${filePath}`);
-  } else {
-    console.log(code);
+  const apis: ParsedApiInfo[] = [];
+  for (const p of searchPaths) {
+    const api = findApiByPath(instance, p);
+    if (api) apis.push(api);
   }
+
+  if (apis.length === 0) {
+    console.error('未匹配到任何接口');
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(`匹配到 ${apis.length} 个接口\n`);
+
+  // 无输出目录时直接打印（接口之间用分隔线分隔）
+  if (!options.outDir) {
+    for (const api of apis) {
+      const code = generateSingleApiCode(api, instance, options);
+      console.log(code);
+      console.log('\n' + '='.repeat(72) + '\n');
+    }
+    return;
+  }
+
+  // 所有接口代码写入同一个文件，重复的类型定义自动去重
+  const outDirPath = path.resolve(options.outDir);
+  fs.mkdirSync(outDirPath, { recursive: true });
+  const filePath = path.join(outDirPath, 'paths.ts');
+
+  const seenTypes = new Set<string>();
+  const allLines: string[] = [];
+  let skipDepth = 0;
+  for (const api of apis) {
+    const code = generateSingleApiCode(api, instance, options);
+    for (const line of code.split('\n')) {
+      if (skipDepth > 0) {
+        if (/[{]/.test(line)) skipDepth++;
+        if (/[}]/.test(line)) skipDepth--;
+        if (skipDepth === 0) continue;
+        continue;
+      }
+      const typeMatch = line.match(/^export (interface|type) (\w+)/);
+      if (typeMatch) {
+        const typeName = typeMatch[2]!;
+        if (seenTypes.has(typeName)) {
+          skipDepth = 1;
+          continue;
+        }
+        seenTypes.add(typeName);
+      }
+      allLines.push(line);
+    }
+  }
+  fs.writeFileSync(filePath, allLines.join('\n') + '\n', 'utf-8');
+  console.log(`代码已生成: ${filePath}`);
 }
 
 // ============================================================
@@ -375,13 +415,15 @@ function handleGenerateByTag(
     console.error(`未找到标签: ${tagName}`);
     console.error(`可用标签:`);
     instance.tags.forEach((t) => console.error(`  ${t.name} (${t.childrens.length} 个接口)`));
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const apis = tag.childrens;
   if (apis.length === 0) {
     console.error(`标签 "${tagName}" 下没有接口`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   console.log(`标签 "${tagName}": ${apis.length} 个接口\n`);

@@ -16,11 +16,11 @@ export default {
 
   // ---- 生成目标（二选一） ----
 
-  /** 按标签 (tag) 生成该分组下所有接口的代码 */
-  tag: 'drawing-class-controller',
+  /** 按标签 (tags) 生成各分组下所有接口的代码（数组，每个 tag 生成一个文件） */
+  tags: ['drawing-class-controller'],
 
-  /** 按接口路径生成（支持部分路径匹配）。与 tag 二选一，同时指定时 tag 优先 */
-  // path: '/drawing/class/queryStudentRead',
+  /** 按接口路径生成（支持部分路径匹配，数组，每个路径生成一个文件）。与 tags 二选一，同时指定时 tags 优先 */
+  // paths: ['/drawing/class/queryStudentRead'],
 
   // ---- 可选 ----
 
