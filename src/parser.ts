@@ -203,6 +203,24 @@ function resolvePropertyValue(
     const type = schema.type;
 
     if (schema.example !== undefined) {
+      // 即便存在 example，也需先解析 array 的 refType，
+      // 避免后续生成代码时因 refType 缺失而输出 unknown[]。
+      if (type === 'array' && schema.items) {
+        const items = schema.items;
+        const ref = items.$ref;
+        const className = getClassName(ref, oas2);
+        if (className) {
+          prop.refType = className;
+        } else if (items.type) {
+          prop.refType = items.type;
+          if (isBasicType(items.type)) {
+            const fmt = items.format;
+            if (strNotBlank(fmt)) {
+              prop.refType = `${items.type}(${fmt})`;
+            }
+          }
+        }
+      }
       return type === 'string' ? getExample('example', propObj, '') : schema.example;
     }
 

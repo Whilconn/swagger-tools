@@ -49,6 +49,23 @@ const CHINESE_TYPE_MAP: Record<string, string> = {
   '返回结果': 'Result',
 };
 
+/** 原始/Java 类型名 → TypeScript 基础类型（用于泛型参数位置，如 ApiResponse«int» → ApiResponse<number>） */
+const PRIMITIVE_TYPE_MAP: Record<string, string> = {
+  int: 'number', integer: 'number', long: 'number', short: 'number', byte: 'number',
+  double: 'number', float: 'number', number: 'number',
+  boolean: 'boolean', bool: 'boolean',
+  string: 'string', char: 'string', character: 'string',
+  object: 'Record<string, unknown>',
+  date: 'string', datetime: 'string', 'date-time': 'string',
+  void: 'void', null: 'null',
+};
+
+/** 将原始类型名映射为 TypeScript 类型（非原始名原样返回） */
+function mapPrimitiveType(name: string): string {
+  const key = name.trim().toLowerCase();
+  return PRIMITIVE_TYPE_MAP[key] ?? name;
+}
+
 /** 将含中文的名称转为可读的 PascalCase 英文标识符（基于拼音） */
 function chineseToIdentifier(name: string): string {
   const syllables = pinyin(name, { toneType: 'none', type: 'array' }) as string[];
@@ -87,7 +104,20 @@ function toEnglishTypeName(name: string): { en: string; authoritative: boolean }
     return { en: chineseToIdentifier(name), authoritative: false };
   }
 
-  // 纯 ASCII，清理特殊字符（去掉点、下划线等非字母数字字符）
+  // 纯 ASCII，先检查是否是带格式后缀的基本类型（如 integer(int32)、number(double)）
+  // authoritative=true 避免与另一基本类型（如 integer）的 'number' 产生冲突去重。
+  const basicMatch = name.match(/^([a-zA-Z]+)(?:\(.*\))?$/);
+  if (basicMatch) {
+    const baseType = basicMatch[1]!.toLowerCase();
+    if (['integer', 'int', 'long', 'short', 'byte', 'double', 'float', 'number'].includes(baseType))
+      return { en: 'number', authoritative: true };
+    if (['boolean', 'bool'].includes(baseType))
+      return { en: 'boolean', authoritative: true };
+    if (['string', 'char', 'character'].includes(baseType))
+      return { en: 'string', authoritative: true };
+  }
+
+  // 非基本类型：清理特殊字符（去掉点、下划线等非字母数字字符）
   return { en: name.replace(/[^a-zA-Z0-9]/g, '') || 'UnknownType', authoritative: false };
 }
 
@@ -186,7 +216,7 @@ function toEnglishName(name: string): string {
 /** 将 GenericTypeNode 转为 TypeScript 类型字符串 */
 function genericNodeToTsType(node: GenericTypeNode): string {
   if (node.params.length === 0) {
-    return node.name;
+    return mapPrimitiveType(node.name);
   }
 
   // List<T> 或 Array<T> → T[]
@@ -253,15 +283,34 @@ function collectDefinitionProperties(def: ParsedDefinition, definitions: ParsedD
   }
 }
 
-/** 生成响应相关的所有 interface 定义 */
-function generateResponseTypes(
-  responseNode: GenericTypeNode,
+/** 收集单个接口需要生成的所有类型：响应类型 + 请求 body 及其递归引用的嵌套类型 */
+function collectAllApiTypes(
+  api: ParsedApiInfo,
+  responseNode: GenericTypeNode | null,
+  definitions: ParsedDefinition[],
+  collected: Set<string>,
+): void {
+  // 响应侧
+  if (responseNode) {
+    collectResponseTypes(responseNode, definitions, collected);
+  }
+  // 请求 body 侧（含其递归引用的嵌套 $ref 类型）
+  const bodyParams = api.parameters.filter(p => p.in === 'body');
+  if (bodyParams.length > 0 && bodyParams[0]!.def) {
+    const def = bodyParams[0]!.def!;
+    if (!collected.has(def.name)) {
+      collected.add(def.name);
+      collectDefinitionProperties(def, definitions, collected);
+    }
+  }
+}
+
+/** 由已收集的 definition 名称集合生成所有 interface 定义 */
+function generateTypeInterfaces(
+  collected: Set<string>,
   definitions: ParsedDefinition[],
   opts: Required<GenerateOptions>,
 ): string[] {
-  const collected = new Set<string>();
-  collectResponseTypes(responseNode, definitions, collected);
-
   const interfaces: string[] = [];
   const generated = new Set<string>();
 
@@ -293,6 +342,17 @@ function generateResponseTypes(
   return interfaces;
 }
 
+/** 生成响应相关的所有 interface 定义 */
+function generateResponseTypes(
+  responseNode: GenericTypeNode,
+  definitions: ParsedDefinition[],
+  opts: Required<GenerateOptions>,
+): string[] {
+  const collected = new Set<string>();
+  collectResponseTypes(responseNode, definitions, collected);
+  return generateTypeInterfaces(collected, definitions, opts);
+}
+
 /** 生成泛型 interface (如 ApiResponse<T>) */
 function generateGenericInterface(
   enName: string,
@@ -317,7 +377,9 @@ function generateGenericInterface(
     payloadProp = def.properties.find(p => p.refType && p.refType === innerRaw);
   }
   if (!payloadProp) {
-    payloadProp = def.properties.find(p => payloadCandidates.includes(p.name) && !!p.refType)
+    // 数据载体字段（data/result/list 等）即使其类型为原始类型（无 refType，如 integer），
+    // 也应识别为泛型参数 T 的载体，而非写成具体原始类型，否则 <T> 形同虚设。
+    payloadProp = def.properties.find(p => payloadCandidates.includes(p.name))
       ?? def.properties.find(p => !!p.refType);
   }
 
@@ -421,23 +483,14 @@ export function generateFetchCode(
     returnTypeTs = basicTypeToTs(response200.responseText);
   }
 
-  // 生成 TypeScript 类型定义
+  // 生成 TypeScript 类型定义（请求 body 及其嵌套类型 + 响应类型，统一去重递归生成）
   if (opts.types) {
-    // 请求 body 类型
-    if (bodyParams.length > 0 && bodyParams[0]!.def) {
-      const def = bodyParams[0]!.def;
-      const reqTypeName = toEnglishName(def.name);
-      lines.push(generateInterface(reqTypeName, def.properties, opts));
+    const collected = new Set<string>();
+    collectAllApiTypes(api, responseNode, definitions, collected);
+    const typeInterfaces = generateTypeInterfaces(collected, definitions, opts);
+    for (const iface of typeInterfaces) {
+      lines.push(iface);
       lines.push('');
-    }
-
-    // 响应类型
-    if (responseNode) {
-      const responseInterfaces = generateResponseTypes(responseNode, definitions, opts);
-      for (const iface of responseInterfaces) {
-        lines.push(iface);
-        lines.push('');
-      }
     }
   }
 
@@ -655,20 +708,14 @@ export function generateAxiosCode(
     returnTypeTs = basicTypeToTs(response200.responseText);
   }
 
-  // 生成 TypeScript 类型定义
+  // 生成 TypeScript 类型定义（请求 body 及其嵌套类型 + 响应类型，统一去重递归生成）
   if (opts.types) {
-    if (bodyParams.length > 0 && bodyParams[0]!.def) {
-      const def = bodyParams[0]!.def;
-      const reqTypeName = toEnglishName(def.name);
-      lines.push(generateInterface(reqTypeName, def.properties, opts));
+    const collected = new Set<string>();
+    collectAllApiTypes(api, responseNode, definitions, collected);
+    const typeInterfaces = generateTypeInterfaces(collected, definitions, opts);
+    for (const iface of typeInterfaces) {
+      lines.push(iface);
       lines.push('');
-    }
-    if (responseNode) {
-      const responseInterfaces = generateResponseTypes(responseNode, definitions, opts);
-      for (const iface of responseInterfaces) {
-        lines.push(iface);
-        lines.push('');
-      }
     }
   }
 
