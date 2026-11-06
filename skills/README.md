@@ -16,7 +16,7 @@ skills/
 
 | Skill | 说明 | 依赖 |
 | --- | --- | --- |
-| [`swagger-request-codegen`](./swagger-request-codegen/SKILL.md) | 由 Swagger/OpenAPI JSON 生成前端请求代码（fetch / axios / cURL）与 TypeScript 类型 | Bun ≥ 1.0；`pinyin-pro` 可选 |
+| [`swagger-request-codegen`](./swagger-request-codegen/SKILL.md) | 由 Swagger/OpenAPI JSON 生成前端请求代码（fetch / axios / cURL）与 TypeScript 类型 | Bun ≥ 1.0（推荐）或 Node ≥ 22.18；`pinyin-pro` 可选 |
 
 ## 安装
 

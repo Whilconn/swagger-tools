@@ -58,7 +58,7 @@ swagger-request-codegen/
 ├── README.md                     # 本文件
 ├── tsconfig.json                 # 可选：类型检查配置
 ├── scripts/
-│   └── gen.ts                    # 零依赖生成器（Bun 运行）
+│   └── gen.ts                    # 零依赖生成器（bun / node 均可运行）
 └── references/
     ├── type-mapping.md           # 参数/响应/类型/泛型/命名映射规则
     ├── framework-templates.md    # axios、React Query、Pinia、Next.js、uni-app 落地模板
@@ -67,9 +67,10 @@ swagger-request-codegen/
 
 ## 环境要求
 
-- Bun ≥ 1.0（直接运行 TypeScript，无需编译；脚本只用 `node:` 内置模块与全局 `fetch`）
+- Bun ≥ 1.0（推荐：直接运行 `.ts`，无需编译、无需安装依赖）
+- Node.js ≥ 22.18 亦可运行（内置类型剥离，不需要 `--experimental-strip-types`）
+- 脚本只用 `node:` 内置模块与全局 `fetch`，不含 `Bun.file` / `Bun.write` / `import.meta.dir` 等 Bun 专属 API
 - 可选：`pinyin-pro`（用于把纯中文模型名转为拼音标识符；缺失时保留中文标识符，TypeScript 仍然合法）
-- 可选：Node.js ≥ 22.18 也能运行（内置类型剥离），仅作兜底，未做兼容承诺
 
 ## 行为约定
 

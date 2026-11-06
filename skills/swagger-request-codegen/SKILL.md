@@ -6,7 +6,7 @@ license: ISC
 
 # Swagger/OpenAPI → 前端请求代码
 
-把接口规范转换为可直接落地的前端请求代码。核心能力由 `scripts/gen.ts` 提供：零依赖 TypeScript 脚本，用 Bun 直接运行（无需构建），解析 OAS 2.0 / 3.0，按 tag 或路径筛选，输出 `fetch` / `axios` / `cURL` 三种形态以及配套的 TypeScript `interface`。
+把接口规范转换为可直接落地的前端请求代码。核心能力由 `scripts/gen.ts` 提供：零依赖 TypeScript 脚本，默认用 Bun 直接运行（无需构建），同时兼容 Node ≥ 22.18；解析 OAS 2.0 / 3.0，按 tag 或路径筛选，输出 `fetch` / `axios` / `cURL` 三种形态以及配套的 TypeScript `interface`。
 
 ## 适用场景
 
@@ -26,7 +26,7 @@ license: ISC
 bun --version   # 期望 ≥ 1.0
 ```
 
-不可用时提示用户安装（`curl -fsSL https://bun.sh/install | bash` 或 `npm i -g bun`），不要因为缺少运行时改为手写代码。
+不可用时提示用户安装（`curl -fsSL https://bun.sh/install | bash` 或 `npm i -g bun`）。若环境确实无法安装 Bun，而 Node ≥ 22.18 可用，可改用 `node scripts/gen.ts ...` 运行（脚本只用 `node:` 内置模块与标准 `fetch`，两种运行时行为一致）；不要因为缺少运行时改为手写代码。
 
 ### 第 1 步：确认输入与目标
 

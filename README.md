@@ -17,7 +17,7 @@
 
 ## 环境要求
 
-- Node.js **>= 22.6**（依赖 `--experimental-strip-types` 直接运行 TS），项目 `volta` 锁定在 **24.7.0**
+- Bun **>= 1.0**（推荐，直接运行 TS，无需编译）；或 Node.js **>= 22.18**（内置类型剥离）。项目 `volta` 锁定在 **24.7.0**
 - TypeScript >= 5.7（使用 `rewriteRelativeImportExtensions`，构建时需要）
 
 ## 安装
@@ -273,7 +273,7 @@ swagger-tools/
 │       ├── SKILL.md        # 触发条件 + 6 步工作流
 │       ├── README.md       # 面向人的使用说明
 │       ├── tsconfig.json   # 类型检查配置
-│       ├── scripts/gen.ts  # 零依赖生成器（Bun 直接运行）
+│       ├── scripts/gen.ts  # 零依赖生成器（bun 运行，兼容 node）
 │       └── references/     # 类型映射 / 框架模板 / 排错手册
 ├── swagger-tools.config.example.mjs # 配置样例
 ├── LICENSE
@@ -297,7 +297,7 @@ npm run skill:package   # 打包为 dist-skills/swagger-request-codegen.zip
 | 命令 | 说明 |
 | --- | --- |
 | `npm run build` | 使用 `tsc` 编译到 `dist/`（含类型声明与 sourceMap） |
-| `npm run cli -- <args>` | 不编译，直接用 Node 运行 `src/cli.ts` |
+| `npm run cli -- <args>` | 不编译，直接用 bun 运行 `src/cli.ts`（Node 亦可） |
 | `npm test` | 以 `api.json` 执行一次解析，用于快速自检 |
 | `npm run skill:install` | 把 `skills/swagger-request-codegen` 安装到 `~/.codebuddy/skills` |
 | `npm run skill:package` | 打包 Skill 为 `dist-skills/swagger-request-codegen.zip` |
