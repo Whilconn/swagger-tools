@@ -10,7 +10,10 @@
   "scripts": {
     "build": "tsc",
     "cli": "node --experimental-strip-types src/cli.ts",
-    "test": "node --experimental-strip-types src/cli.ts api.json"
+    "test": "node --experimental-strip-types src/cli.ts api.json",
+    "skill:install": "mkdir -p \"$HOME/.codebuddy/skills\" && rm -rf \"$HOME/.codebuddy/skills/swagger-request-codegen\" && cp -R skills/swagger-request-codegen \"$HOME/.codebuddy/skills/\"",
+    "skill:package": "mkdir -p dist-skills && rm -f dist-skills/swagger-request-codegen.zip && cd skills && zip -qr ../dist-skills/swagger-request-codegen.zip swagger-request-codegen",
+    "skill:typecheck": "tsc -p skills/swagger-request-codegen/tsconfig.json"
   },
   "keywords": [
     "swagger",
